@@ -29,6 +29,15 @@ max age shorter than the retry schedule). Webhook URLs are participant-supplied,
 the public internet; `PARTICIPANT_NOTIFICATIONS_ALLOWED_HOSTS` narrows it to listed hosts.
 Integrators read [`participant-notifications.md`](participant-notifications.md).
 
+The Contract Service `CONTRACT_SERVICE_URL` names is read on two endpoints: a contract URI's last
+path segment is looked up first under `/contracts/{id}` (ecosystem shape) and, when that is a miss,
+under `/bilaterals/{id}` (bilateral shape). An upstream holding only bilateral contracts needs no
+configuration to say so - a `404`, `405` or `501` on the ecosystem endpoint moves the lookup on to
+the bilateral one instead of failing it. Everything else is an upstream failure: a `5xx` other than
+`501`, or a transport failure, is retried to the `CONTRACT_SERVICE_RETRY_*` budget and then
+surfaces as `502`, and so does the bilateral endpoint refusing the request the ecosystem one
+deferred.
+
 ## Related documents
 
 - [`security.md`](security.md): the token, health and signing-key model.

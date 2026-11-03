@@ -5,10 +5,13 @@ import com.seamware.consentmanager.config.ConsentManagerConfiguration;
 import com.seamware.consentmanager.error.UpstreamServiceException;
 import io.micronaut.cache.CacheManager;
 import io.micronaut.cache.SyncCache;
+import io.micronaut.http.HttpStatus;
 import io.micronaut.http.client.exceptions.HttpClientException;
+import io.micronaut.http.client.exceptions.HttpClientResponseException;
 import io.micronaut.http.codec.CodecException;
 import jakarta.inject.Singleton;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Resolves a contract URI via the ecosystem, then the bilateral endpoint; the only contract cache.
@@ -24,6 +27,15 @@ public class ContractGateway {
 
     /** Characters that end a URI's path; a query or fragment is no part of the identifier. */
     private static final String PATH_TERMINATORS = "?#";
+
+    /**
+     * Statuses with which an upstream says it does not serve the ecosystem endpoint at all. A
+     * Contract Service that keeps only bilateral contracts answers one of these instead of the 404
+     * that means "no such contract", so both have to lead on to the bilateral endpoint rather than
+     * count as a failure.
+     */
+    private static final Set<Integer> ECOSYSTEM_ENDPOINT_ABSENT =
+            Set.of(HttpStatus.METHOD_NOT_ALLOWED.getCode(), HttpStatus.NOT_IMPLEMENTED.getCode());
 
     private final ContractServiceClient client;
     private final SyncCache<?> cache;
@@ -79,13 +91,30 @@ public class ContractGateway {
     private Optional<ContractResponse> fetchUpstream(String contractUri) {
         String contractId = contractIdOf(contractUri);
         try {
-            Optional<ContractResponse> ecosystem = client.fetchContract(contractId);
+            Optional<ContractResponse> ecosystem = fetchEcosystem(contractId);
             return ecosystem.isPresent() ? ecosystem : client.fetchBilateralContract(contractId);
         } catch (HttpClientException | CodecException e) {
             throw new UpstreamServiceException(
                     "Contract Service at %s failed for contract %s"
                             .formatted(upstreamUrl, contractUri),
                     e);
+        }
+    }
+
+    /**
+     * The ecosystem contract, empty when the upstream knows no such contract or serves no ecosystem
+     * endpoint at all. Only this endpoint may be absent: the bilateral call that follows raises
+     * whatever it is answered with, so an upstream serving neither shape stays an upstream failure
+     * instead of silently reading as an unknown contract.
+     */
+    private Optional<ContractResponse> fetchEcosystem(String contractId) {
+        try {
+            return client.fetchContract(contractId);
+        } catch (HttpClientResponseException e) {
+            if (!ECOSYSTEM_ENDPOINT_ABSENT.contains(e.getStatus().getCode())) {
+                throw e;
+            }
+            return Optional.empty();
         }
     }
 }

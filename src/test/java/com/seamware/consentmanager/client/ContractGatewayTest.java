@@ -175,6 +175,50 @@ class ContractGatewayTest {
         }
     }
 
+    @ParameterizedTest(name = "an ecosystem endpoint answering {0} is stepped over")
+    @ValueSource(ints = {405, 501})
+    @DisplayName("an upstream serving only bilateral contracts is still read, once per endpoint")
+    void fallsBackWhenTheEcosystemEndpointIsAbsent(int status) {
+        try (ContractServiceStub stub = new ContractServiceStub();
+                ApplicationContext context = startContext(stub, Map.of())) {
+            stub.serveEcosystemStatus(CONTRACT_ID, status);
+            stub.serveBilateralContract(
+                    CONTRACT_ID, ContractFixtures.body(ContractFixtures.BILATERAL));
+            ContractGateway gateway = context.getBean(ContractGateway.class);
+
+            assertThat(gateway.fetch(CONTRACT_URI).orElseThrow().shape())
+                    .as("an upstream that keeps no ecosystem contracts still holds bilateral ones")
+                    .isEqualTo(ContractResponse.Shape.BILATERAL);
+
+            assertThat(stub.ecosystemRequestCount(CONTRACT_ID))
+                    .as("an endpoint that does not exist is not worth a retry")
+                    .isEqualTo(1);
+            assertThat(stub.bilateralRequestCount(CONTRACT_ID))
+                    .as("the fallback is reached as directly as after a 404")
+                    .isEqualTo(1);
+        }
+    }
+
+    @ParameterizedTest(name = "both endpoints answering {0} is an upstream failure")
+    @ValueSource(ints = {405, 501})
+    @DisplayName("an upstream serving neither endpoint fails rather than reading as unknown")
+    void anUpstreamWithoutEitherEndpointIsAFailure(int status) {
+        try (ContractServiceStub stub = new ContractServiceStub();
+                ApplicationContext context = startContext(stub, Map.of())) {
+            stub.serveStatus(CONTRACT_ID, status);
+            ContractGateway gateway = context.getBean(ContractGateway.class);
+
+            assertThatThrownBy(() -> gateway.fetch(CONTRACT_URI))
+                    .as("a Contract Service with no contract endpoint is misconfigured, not empty")
+                    .isInstanceOf(UpstreamServiceException.class)
+                    .hasMessageContaining(CONTRACT_URI);
+
+            assertThat(stub.bilateralRequestCount(CONTRACT_ID))
+                    .as("neither endpoint's refusal is retried")
+                    .isEqualTo(1);
+        }
+    }
+
     @Test
     @DisplayName("a 200 carrying no contract is an upstream failure, not a defect in this service")
     void anUndecodableBodyIsAnUpstreamFailure() {
