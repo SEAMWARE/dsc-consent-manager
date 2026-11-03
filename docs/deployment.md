@@ -38,6 +38,13 @@ the bilateral one instead of failing it. Everything else is an upstream failure:
 surfaces as `502`, and so does the bilateral endpoint refusing the request the ecosystem one
 deferred.
 
+A contract may name its parties by the participant identifiers this service registers, or by the
+`selfDescriptionUri` each participant published - a Contract Service that projects catalog
+documents names them by the latter. Either resolves to the same registration, so no configuration
+chooses between them, and the notice records the participant identifier whichever the contract used
+(ADR-0017). A self-description URI claimed by two active registrations names neither: generation
+answers `404`, and the duplicate registration is the thing to fix.
+
 Outbound HTTP goes through a proxy when `MICRONAUT_HTTP_CLIENT_PROXY_TYPE` and
 `MICRONAUT_HTTP_CLIENT_PROXY_ADDRESS` are set - needed where an identity provider is reachable only
 under its public name. That block is the default for every client, and one client is exempted by

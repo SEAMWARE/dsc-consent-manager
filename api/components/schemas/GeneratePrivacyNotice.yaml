@@ -12,7 +12,9 @@ description: >
 
   `dataProvider` and `dataConsumer` are **global participant identifiers**, the
   same values `GET /participants` lists — not self-description URLs, and not
-  identifiers of any kind this service hands out. **Nothing here is
+  identifiers of any kind this service hands out. (The *contract* those two are
+  checked against may name them either way; what this body declares is the
+  identifier.) **Nothing here is
   base64-encoded**, neither on this operation nor on the calls it makes to the
   Contract Service; an encoded identifier is simply an identifier nobody is
   registered under and is answered `404`.

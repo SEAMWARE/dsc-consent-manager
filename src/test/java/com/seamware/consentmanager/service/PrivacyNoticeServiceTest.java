@@ -522,6 +522,15 @@ class PrivacyNoticeServiceTest {
         }
 
         @Override
+        public List<Participant> findBySelfDescriptionUri(String selfDescriptionUri) {
+            return rows().values().stream()
+                    .filter(
+                            participant ->
+                                    selfDescriptionUri.equals(participant.getSelfDescriptionUri()))
+                    .toList();
+        }
+
+        @Override
         public Optional<Participant> findByIdForUpdate(UUID id) {
             throw unsupported();
         }
