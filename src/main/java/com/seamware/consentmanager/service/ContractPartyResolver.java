@@ -18,6 +18,11 @@ import java.util.stream.Stream;
 /**
  * The one definition of a contract's parties: derives them, and judges a declared pair by the same
  * evidence {@link #requireBound} uses. Pure; never consults the participant directory.
+ *
+ * <p>A party is judged against a {@link PartyAlias} rather than a bare identifier, because a
+ * contract may name a participant by either of its names (ADR-0017). Deriving parties with {@link
+ * #resolve} still yields the values the contract states verbatim - which name they are is the
+ * directory's business, not this class's.
  */
 @Singleton
 public class ContractPartyResolver {
@@ -52,17 +57,17 @@ public class ContractPartyResolver {
     /** Whether the contract puts the participant on the side, as {@link #requireBound} reads it. */
     public boolean binds(
             @NonNull ContractResponse contract,
-            @NonNull String participant,
+            @NonNull PartyAlias participant,
             @NonNull ContractSide side) {
         return switch (contract.shape()) {
             case BILATERAL ->
-                    participant.equals(
+                    participant.names(
                             switch (side) {
                                 case PROVIDER -> contract.dataProviderIdentifier();
                                 case CONSUMER -> contract.dataConsumerIdentifier();
                             });
             case ECOSYSTEM ->
-                    activeMembers(contract).contains(participant)
+                    named(activeMembers(contract), participant)
                             && !recordedOnOtherSide(contract, participant, side)
                             && !(side == ContractSide.CONSUMER
                                     && offersWithoutRole(contract, participant));
@@ -75,16 +80,16 @@ public class ContractPartyResolver {
      */
     public void requireBound(
             @NonNull ContractResponse contract,
-            @NonNull String provider,
-            @NonNull String consumer) {
+            @NonNull PartyAlias provider,
+            @NonNull PartyAlias consumer) {
         switch (contract.shape()) {
             case BILATERAL -> {
                 requireNamed(
-                        provider.equals(contract.dataProviderIdentifier()),
+                        provider.names(contract.dataProviderIdentifier()),
                         provider,
                         "data provider");
                 requireNamed(
-                        consumer.equals(contract.dataConsumerIdentifier()),
+                        consumer.names(contract.dataConsumerIdentifier()),
                         consumer,
                         "data consumer");
             }
@@ -129,10 +134,10 @@ public class ContractPartyResolver {
      * direction by role or offering; with neither evidenced, the declaration stands.
      */
     private static void requireEcosystemParties(
-            ContractResponse contract, String provider, String consumer) {
+            ContractResponse contract, PartyAlias provider, PartyAlias consumer) {
         Set<String> members = activeMembers(contract);
-        requireNamedParty(members.contains(provider), provider);
-        requireNamedParty(members.contains(consumer), consumer);
+        requireNamedParty(named(members, provider), provider);
+        requireNamedParty(named(members, consumer), consumer);
 
         if (recordedOnOtherSide(contract, provider, ContractSide.PROVIDER)) {
             throw contradicted(provider, "data consumer", "data provider");
@@ -143,7 +148,7 @@ public class ContractPartyResolver {
         if (offersWithoutRole(contract, consumer)) {
             throw new BadRequestException(
                     "The contract names '"
-                            + consumer
+                            + consumer.identifier()
                             + "' as offering a service under it and records no role saying"
                             + " otherwise, so it cannot be this notice's data consumer.");
         }
@@ -151,20 +156,27 @@ public class ContractPartyResolver {
 
     /** Whether the contract records the participant in the role opposite {@code side} only. */
     private static boolean recordedOnOtherSide(
-            ContractResponse contract, String participant, ContractSide side) {
+            ContractResponse contract, PartyAlias participant, ContractSide side) {
         Set<String> providers = membersInRole(contract, DATA_PROVIDER_ROLE);
         Set<String> consumers = membersInRole(contract, DATA_CONSUMER_ROLE);
         return switch (side) {
-            case PROVIDER -> consumers.contains(participant) && !providers.contains(participant);
-            case CONSUMER -> providers.contains(participant) && !consumers.contains(participant);
+            case PROVIDER -> named(consumers, participant) && !named(providers, participant);
+            case CONSUMER -> named(providers, participant) && !named(consumers, participant);
         };
     }
 
     /** Whether the participant offers a service and records no role, which reads it as provider. */
-    private static boolean offersWithoutRole(ContractResponse contract, String participant) {
-        return !membersInRole(contract, DATA_PROVIDER_ROLE).contains(participant)
-                && !membersInRole(contract, DATA_CONSUMER_ROLE).contains(participant)
-                && offeringParticipants(contract).contains(participant);
+    private static boolean offersWithoutRole(ContractResponse contract, PartyAlias participant) {
+        return !named(membersInRole(contract, DATA_PROVIDER_ROLE), participant)
+                && !named(membersInRole(contract, DATA_CONSUMER_ROLE), participant)
+                && named(offeringParticipants(contract), participant);
+    }
+
+    /**
+     * Whether any of the parties a contract states is the participant under either of its names.
+     */
+    private static boolean named(Set<String> statedParties, PartyAlias participant) {
+        return statedParties.stream().anyMatch(participant::names);
     }
 
     /** Refuses a bilateral contract that leaves one of its two parties unstated. */
@@ -200,26 +212,32 @@ public class ContractPartyResolver {
         return side.iterator().next();
     }
 
-    private static void requireNamed(boolean bound, String identifier, String role) {
+    private static void requireNamed(boolean bound, PartyAlias participant, String role) {
         if (!bound) {
             throw new BadRequestException(
-                    "The contract does not bind '" + identifier + "' as its " + role + ".");
+                    "The contract does not bind '"
+                            + participant.identifier()
+                            + "' as its "
+                            + role
+                            + ".");
         }
     }
 
-    private static void requireNamedParty(boolean named, String identifier) {
+    private static void requireNamedParty(boolean named, PartyAlias participant) {
         if (!named) {
             throw new BadRequestException(
-                    "The contract does not name '" + identifier + "' as a party to it.");
+                    "The contract does not name '"
+                            + participant.identifier()
+                            + "' as a party to it.");
         }
     }
 
     /** Says which side the contract puts a participant on, and which side the request claimed. */
     private static BadRequestException contradicted(
-            String identifier, String recorded, String declared) {
+            PartyAlias participant, String recorded, String declared) {
         return new BadRequestException(
                 "The contract records '"
-                        + identifier
+                        + participant.identifier()
                         + "' as its "
                         + recorded
                         + ", so it cannot be this notice's "

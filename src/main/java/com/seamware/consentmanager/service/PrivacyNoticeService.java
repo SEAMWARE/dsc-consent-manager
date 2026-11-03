@@ -15,6 +15,7 @@ import io.micronaut.core.annotation.NonNull;
 import io.micronaut.core.annotation.Nullable;
 import io.micronaut.data.exceptions.DataAccessException;
 import jakarta.inject.Singleton;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -29,6 +30,9 @@ import java.util.UUID;
  */
 @Singleton
 public class PrivacyNoticeService {
+
+    /** How many rows may claim one self-description URI for it to name a participant. */
+    private static final int UNAMBIGUOUS = 1;
 
     private final ParticipantRepository participants;
     private final PrivacyNoticeRepository notices;
@@ -107,11 +111,11 @@ public class PrivacyNoticeService {
             @NonNull String contractUri,
             @NonNull String providerIdentifier,
             @NonNull String consumerIdentifier) {
-        String callerIdentifier = caller.requireActive().getIdentifier();
+        PartyAlias callerNames = PartyAlias.of(caller.requireActive());
         requireDistinctParties(providerIdentifier, consumerIdentifier);
-        Participant provider = require(providerIdentifier);
-        Participant consumer = require(consumerIdentifier);
-        requireParty(callerIdentifier, providerIdentifier, consumerIdentifier);
+        Participant provider = requireRegistered(providerIdentifier);
+        Participant consumer = requireRegistered(consumerIdentifier);
+        requireParty(callerNames, providerIdentifier, consumerIdentifier);
 
         return generate(fetch(contractUri), contractUri, provider, consumer);
     }
@@ -126,21 +130,25 @@ public class PrivacyNoticeService {
     @NonNull
     public GeneratedNotice generateByContract(
             @NonNull ParticipantPrincipal caller, @NonNull String contractUri) {
-        String callerIdentifier = caller.requireActive().getIdentifier();
+        PartyAlias callerNames = PartyAlias.of(caller.requireActive());
         ContractResponse contract = fetch(contractUri);
         ContractParties derived = parties.resolve(contract);
 
-        requireParty(callerIdentifier, derived.dataProvider(), derived.dataConsumer());
+        requireParty(callerNames, derived.dataProvider(), derived.dataConsumer());
         requireDistinctParties(derived.dataProvider(), derived.dataConsumer());
-        Participant provider = require(derived.dataProvider());
-        Participant consumer = require(derived.dataConsumer());
+        Participant provider = requireStated(derived.dataProvider());
+        Participant consumer = requireStated(derived.dataConsumer());
 
         return generate(contract, contractUri, provider, consumer);
     }
 
     /**
-     * Shared tail: requires the contract to bind the pair (derived parties too, as a guard against
-     * drift), then stores the notice or finds it stored.
+     * Shared tail: requires the two to be different rows and the contract to bind them (derived
+     * parties too, as a guard against drift), then stores the notice or finds it stored.
+     *
+     * <p>The distinctness check is repeated on the resolved rows because the stated parties are
+     * compared as strings: one participant stated once by identifier and once by self-description
+     * URI reads as two parties and is one.
      */
     @NonNull
     private GeneratedNotice generate(
@@ -148,7 +156,8 @@ public class PrivacyNoticeService {
             String contractUri,
             Participant provider,
             Participant consumer) {
-        parties.requireBound(contract, provider.getIdentifier(), consumer.getIdentifier());
+        requireDistinctParticipants(provider, consumer);
+        parties.requireBound(contract, PartyAlias.of(provider), PartyAlias.of(consumer));
         return store(contractUri, provider, consumer, extractor.extract(contract, provider));
     }
 
@@ -174,29 +183,72 @@ public class PrivacyNoticeService {
         }
     }
 
+    /** Refuses a stated pair that is one participant under two of its names. */
+    private static void requireDistinctParticipants(Participant provider, Participant consumer) {
+        if (provider.getId().equals(consumer.getId())) {
+            throw new BadRequestException(
+                    "The data provider and the data consumer must be different participants, but"
+                            + " both are '"
+                            + provider.getIdentifier()
+                            + "'.");
+        }
+    }
+
     /**
      * The active participant an identifier names; {@code 404} when none, a departed one included.
      * See ADR-0008.
+     *
+     * <p>Only the identifier: the two parties a request declares are declared as the identifiers
+     * {@code GET /participants} lists, which is what {@code GeneratePrivacyNotice} states.
      */
     @NonNull
-    private Participant require(String identifier) {
-        return participants
-                .findByIdentifier(identifier)
-                .filter(participant -> participant.getDeregisteredAt() == null)
-                .orElseThrow(
-                        () ->
-                                new NotFoundException(
-                                        "No active participant is registered under '"
-                                                + identifier
-                                                + "'."));
+    private Participant requireRegistered(String identifier) {
+        return active(participants.findByIdentifier(identifier))
+                .orElseThrow(() -> unregistered(identifier));
     }
 
-    /** Refuses a caller that is neither of the two parties. */
-    private static void requireParty(String identifier, String provider, String consumer) {
-        if (!identifier.equals(provider) && !identifier.equals(consumer)) {
+    /**
+     * The active participant a party the <em>contract</em> states names, by identifier or by the
+     * self-description URI it published (ADR-0017); {@code 404} when none.
+     */
+    @NonNull
+    private Participant requireStated(String statedParty) {
+        return active(participants.findByIdentifier(statedParty))
+                .or(() -> bySelfDescription(statedParty))
+                .orElseThrow(() -> unregistered(statedParty));
+    }
+
+    /** The refusal both lookups raise, worded the same whichever name was not found. */
+    private static NotFoundException unregistered(String party) {
+        return new NotFoundException("No active participant is registered under '" + party + "'.");
+    }
+
+    /**
+     * The one active participant that published its self-description under the URI.
+     *
+     * <p>Empty when two of them claim it: the column is not unique (a participant declares it at
+     * registration), and releasing a notice to whichever row happened to be read first would let a
+     * registration decide whose contract this is.
+     */
+    private Optional<Participant> bySelfDescription(String selfDescriptionUri) {
+        List<Participant> claiming =
+                participants.findBySelfDescriptionUri(selfDescriptionUri).stream()
+                        .filter(participant -> participant.getDeregisteredAt() == null)
+                        .toList();
+        return claiming.size() == UNAMBIGUOUS ? Optional.of(claiming.getFirst()) : Optional.empty();
+    }
+
+    /** The participant, if it is one that has not left. */
+    private static Optional<Participant> active(Optional<Participant> participant) {
+        return participant.filter(found -> found.getDeregisteredAt() == null);
+    }
+
+    /** Refuses a caller that is neither of the two parties, under either of its names. */
+    private static void requireParty(PartyAlias caller, String provider, String consumer) {
+        if (!caller.names(provider) && !caller.names(consumer)) {
             throw new ForbiddenException(
                     "Participant '"
-                            + identifier
+                            + caller.identifier()
                             + "' is neither the data provider nor the data consumer of this"
                             + " notice, so it may not generate it.");
         }

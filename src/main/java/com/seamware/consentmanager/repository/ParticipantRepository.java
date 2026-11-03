@@ -23,6 +23,16 @@ public interface ParticipantRepository extends PageableRepository<Participant, U
     boolean existsByIdentifier(String identifier);
 
     /**
+     * The participants that published their self-description under the URI, the one name besides
+     * the identifier a contract may call a party by (ADR-0017).
+     *
+     * <p>A list, not an {@code Optional}: the column carries no unique constraint, since a
+     * participant declares the URI itself at registration. Two rows claiming one URI make the name
+     * ambiguous, and a caller that cannot tell which row is meant has to refuse rather than pick.
+     */
+    List<Participant> findBySelfDescriptionUri(String selfDescriptionUri);
+
+    /**
      * One participant, row-locked so a self-service write and deregistration serialize. {@code NO
      * KEY} so a racing grant's outbox FK check is not blocked into a deadlock with its consent
      * lock.

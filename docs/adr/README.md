@@ -27,6 +27,7 @@ Up to the [Documentation](../README.md) index · the [project README](../../READ
 | [0008](0008-deregistration-retains-the-participant-and-closes-its-open-business.md) | Deregistration retains the participant and closes its open business | Accepted | Refused with `409` while a grant is outstanding; otherwise closes open business, archives notices, then deletes the row or retains it marked deregistered, in one transaction. |
 | [0009](0009-only-the-data-subject-grants-consent.md) | Only the data subject grants consent, and a request confers nothing | Accepted | `POST /consents` is a pure `USER` route reading the subject from the token alone; bounded by 0010's single relay. |
 | [0010](0010-a-catalog-relayed-resume-names-the-subject.md) | A catalog may relay a resume, and the trail names it as the relay | Accepted | A `CATALOG` caller may relay a decision the subject took elsewhere, on one operation, fenced by conditions enforced in code. |
+| [0017](0017-a-contract-may-name-a-party-by-its-self-description.md) | A contract may name a party by its self-description URI | Accepted | A contract may call a participant by its identifier or by the catalog URL it published; both name one registration, and a URL two of them claim names neither. |
 
 ## Consent records, receipts and notifications
 

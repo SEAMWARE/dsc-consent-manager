@@ -110,7 +110,7 @@ public class ContractDiscoveryService {
                     case PROVIDER -> notices.findActiveContractUrisByProvider(participantId);
                     case CONSUMER -> notices.findActiveContractUrisByConsumer(participantId);
                 };
-        Claim claim = new Claim(participant.getIdentifier(), side);
+        Claim claim = new Claim(PartyAlias.of(participant), side);
         uris.forEach(
                 uri -> candidates.computeIfAbsent(uri, ignored -> new ArrayList<>()).add(claim));
     }
@@ -190,5 +190,5 @@ public class ContractDiscoveryService {
     }
 
     /** A notice's claim that the participant takes this side in its contract. */
-    private record Claim(String participant, ContractSide side) {}
+    private record Claim(PartyAlias participant, ContractSide side) {}
 }

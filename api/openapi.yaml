@@ -1286,6 +1286,15 @@ paths:
         the same operation with the ambiguity resolved by the caller. A contract
         this service cannot reach is still `502`, and a party the contract names
         but this service has no active registration for is still `404`.
+
+
+        A contract may call a party by **either** name its registration carries:
+        the participant identifier, or the `selfDescriptionUri` it published — a
+        Contract Service projecting catalog documents names the parties by the
+        latter. Both resolve to the same registration, and the notice records
+        the participant identifier either way. A self-description URI that two
+        active registrations claim names neither of them, and is the same `404`
+        as a party nobody is registered under.
       tags:
         - Privacy Notices
       security:

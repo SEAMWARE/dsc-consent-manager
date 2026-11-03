@@ -1175,6 +1175,13 @@ class UserServiceTest {
         }
 
         @Override
+        public List<Participant> findBySelfDescriptionUri(String selfDescriptionUri) {
+            return rows().values().stream()
+                    .filter(p -> selfDescriptionUri.equals(p.getSelfDescriptionUri()))
+                    .toList();
+        }
+
+        @Override
         public boolean existsByIdentifier(String identifier) {
             throw unsupported();
         }

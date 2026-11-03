@@ -2,6 +2,7 @@ package com.seamware.consentmanager.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.seamware.consentmanager.domain.Participant;
 import com.seamware.consentmanager.domain.PrivacyNotice;
 import com.seamware.consentmanager.support.ContractFixtures;
 import com.seamware.consentmanager.support.PrivacyNoticeApiTestSupport;
@@ -28,6 +29,14 @@ class PrivacyNoticeByContractIT extends PrivacyNoticeApiTestSupport {
 
     /** Problem member carrying the refusal's explanation, per RFC 7807. */
     private static final String DETAIL = "detail";
+
+    /** The catalog URL the caller publishes its self-description at. */
+    private static final String CALLER_SELF_DESCRIPTION =
+            "https://catalog.example.org/participants/caller";
+
+    /** The catalog URL the consumer publishes its self-description at. */
+    private static final String CONSUMER_SELF_DESCRIPTION =
+            "https://catalog.example.org/participants/consumer";
 
     @Test
     @DisplayName("the contract's own parties yield the notice the declared form would have")
@@ -185,6 +194,65 @@ class PrivacyNoticeByContractIT extends PrivacyNoticeApiTestSupport {
                 .as("the notice consents were given against is kept, archived")
                 .isNotNull();
         assertThat(activeNotices(contractUri)).hasSize(1);
+    }
+
+    /**
+     * A Contract Service that projects catalog documents names the parties by the URL each
+     * published its self-description at, never by the identifier they register and authenticate
+     * under. Both name the same registration, so the notice is generated for the same two
+     * participants and records them under their identifiers (ADR-0017).
+     */
+    @Test
+    @DisplayName("a contract naming its parties by self-description URI generates for the same two")
+    void derivesPartiesStatedBySelfDescription() {
+        publishSelfDescription(CALLER, CALLER_SELF_DESCRIPTION);
+        publishSelfDescription(CONSUMER, CONSUMER_SELF_DESCRIPTION);
+        String contractUri = serveBody("self-described", selfDescribedBilateral());
+
+        HttpResponse<String> response = generate(contractUri);
+
+        assertThat(response.code()).isEqualTo(HttpStatus.CREATED.getCode());
+        Map<String, Object> body = body(response);
+        assertThat(body.get("dataProvider"))
+                .as("the caller is a party under the URL the contract calls it by")
+                .isEqualTo(CALLER);
+        assertThat(body.get("dataConsumer")).isEqualTo(CONSUMER);
+        assertThat(activeNotices(contractUri)).hasSize(1);
+    }
+
+    /**
+     * The column carries no unique constraint - a participant declares the URI itself - so two
+     * registrations can claim one URL. Picking either would let a registration decide whose
+     * contract this is, so the name resolves to nobody.
+     */
+    @Test
+    @DisplayName("a self-description URI two participants claim names neither of them")
+    void refusesASelfDescriptionTwoParticipantsClaim() {
+        publishSelfDescription(CALLER, CALLER_SELF_DESCRIPTION);
+        publishSelfDescription(CONSUMER, CONSUMER_SELF_DESCRIPTION);
+        publishSelfDescription(OTHER_CONSUMER, CONSUMER_SELF_DESCRIPTION);
+        String contractUri = serveBody("self-described-ambiguous", selfDescribedBilateral());
+
+        HttpResponse<String> response = generate(contractUri);
+
+        assertThat(response.code())
+                .as("the caller is a party, so it sees the real reason: no party is named")
+                .isEqualTo(HttpStatus.NOT_FOUND.getCode());
+        assertThat(allNotices(contractUri)).isEmpty();
+    }
+
+    /** The bilateral fixture with both parties stated as the URLs they published. */
+    private String selfDescribedBilateral() {
+        return ContractFixtures.body(ContractFixtures.BILATERAL)
+                .replace(FIXTURE_PROVIDER, CALLER_SELF_DESCRIPTION)
+                .replace(CONSUMER, CONSUMER_SELF_DESCRIPTION);
+    }
+
+    /** Records the URL a registered party publishes its self-description at. */
+    private void publishSelfDescription(String identifier, String selfDescriptionUri) {
+        Participant party = participant(identifier);
+        party.setSelfDescriptionUri(selfDescriptionUri);
+        participants.update(party);
     }
 
     /** Issues a by-contract generation with the realm's participant token. */

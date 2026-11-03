@@ -9,6 +9,7 @@ import com.seamware.consentmanager.error.BadRequestException;
 import com.seamware.consentmanager.support.ContractFixtures;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -32,7 +33,26 @@ class ContractPartyResolverTest {
     /** The member {@link ContractFixtures#ECOSYSTEM_NO_PURPOSE} records as revoked. */
     private static final String DEPARTED = "did:web:departed.example.org";
 
+    /** The self-description URI the provider published, the second name it may be called by. */
+    private static final String PROVIDER_SELF_DESCRIPTION =
+            "https://catalog.example.org/participants/provider";
+
     private final ContractPartyResolver resolver = new ContractPartyResolver();
+
+    /** A participant known by its identifier alone, which is how most fixtures name one. */
+    private static PartyAlias named(String identifier) {
+        return new PartyAlias(identifier, null);
+    }
+
+    /** A bilateral contract stating exactly the two parties given, whatever names they are. */
+    private static ContractResponse bilateralBetween(String provider, String consumer) {
+        return ContractFixtures.decode(
+                """
+                { "uid": "66d0e2f7a1b2c3d4e5f60099", "status": "signed",
+                  "dataProvider": "%s", "dataConsumer": "%s" }
+                """
+                        .formatted(provider, consumer));
+    }
 
     /** Contracts that narrow each side to exactly one party, and what narrowed it. */
     static List<Arguments> resolvingContracts() {
@@ -104,7 +124,9 @@ class ContractPartyResolverTest {
         assertThatCode(
                         () ->
                                 resolver.requireBound(
-                                        contract, parties.dataProvider(), parties.dataConsumer()))
+                                        contract,
+                                        named(parties.dataProvider()),
+                                        named(parties.dataConsumer())))
                 .as(description)
                 .doesNotThrowAnyException();
     }
@@ -200,7 +222,7 @@ class ContractPartyResolverTest {
             String participant,
             ContractSide side,
             boolean bound) {
-        assertThat(resolver.binds(ContractFixtures.contract(fixture), participant, side))
+        assertThat(resolver.binds(ContractFixtures.contract(fixture), named(participant), side))
                 .as(description)
                 .isEqualTo(bound);
     }
@@ -213,11 +235,44 @@ class ContractPartyResolverTest {
         ContractResponse contract = ContractFixtures.contract(fixture);
         ContractParties parties = resolver.resolve(contract);
 
-        assertThat(resolver.binds(contract, parties.dataProvider(), ContractSide.PROVIDER))
+        assertThat(resolver.binds(contract, named(parties.dataProvider()), ContractSide.PROVIDER))
                 .as(description)
                 .isTrue();
-        assertThat(resolver.binds(contract, parties.dataConsumer(), ContractSide.CONSUMER))
+        assertThat(resolver.binds(contract, named(parties.dataConsumer()), ContractSide.CONSUMER))
                 .as(description)
                 .isTrue();
+    }
+
+    /**
+     * A contract written by a Contract Service that names its parties by catalog URL binds the same
+     * participants as one that names them by identifier - that is the point of ADR-0017.
+     */
+    @Test
+    @DisplayName("a party stated as a self-description URI binds the participant that published it")
+    void bindsAPartyStatedBySelfDescription() {
+        ContractResponse contract = bilateralBetween(PROVIDER_SELF_DESCRIPTION, CONSUMER);
+        PartyAlias provider = new PartyAlias(PROVIDER, PROVIDER_SELF_DESCRIPTION);
+
+        assertThat(resolver.binds(contract, provider, ContractSide.PROVIDER))
+                .as("the contract calls the provider by the URI it published")
+                .isTrue();
+        assertThatCode(() -> resolver.requireBound(contract, provider, named(CONSUMER)))
+                .as("so the pair the contract binds is the pair declared by identifier")
+                .doesNotThrowAnyException();
+    }
+
+    /** The URI only names the participant that published it, never one that published none. */
+    @Test
+    @DisplayName("a participant without a self-description is bound by its identifier alone")
+    void doesNotBindAPartyWithoutASelfDescription() {
+        ContractResponse contract = bilateralBetween(PROVIDER_SELF_DESCRIPTION, CONSUMER);
+
+        assertThat(resolver.binds(contract, named(PROVIDER), ContractSide.PROVIDER))
+                .as("the identifier is not the URI the contract states")
+                .isFalse();
+        assertThatThrownBy(() -> resolver.requireBound(contract, named(PROVIDER), named(CONSUMER)))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining(PROVIDER)
+                .hasMessageContaining("data provider");
     }
 }
