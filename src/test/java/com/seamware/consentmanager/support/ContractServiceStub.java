@@ -67,6 +67,14 @@ public final class ContractServiceStub implements AutoCloseable {
         stubStatus(BILATERAL_PATH + contractId, status);
     }
 
+    /**
+     * Answers the ecosystem endpoint alone with a status, leaving the bilateral one free to be
+     * stubbed separately - the shape of an upstream that serves only bilateral contracts.
+     */
+    public void serveEcosystemStatus(String contractId, int status) {
+        stubStatus(ECOSYSTEM_PATH + contractId, status);
+    }
+
     /** Answers both endpoints with 404, the "no such contract" case. */
     public void serveUnknown(String contractId) {
         serveStatus(contractId, NOT_FOUND);

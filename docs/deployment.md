@@ -29,6 +29,23 @@ max age shorter than the retry schedule). Webhook URLs are participant-supplied,
 the public internet; `PARTICIPANT_NOTIFICATIONS_ALLOWED_HOSTS` narrows it to listed hosts.
 Integrators read [`participant-notifications.md`](participant-notifications.md).
 
+The Contract Service `CONTRACT_SERVICE_URL` names is read on two endpoints: a contract URI's last
+path segment is looked up first under `/contracts/{id}` (ecosystem shape) and, when that is a miss,
+under `/bilaterals/{id}` (bilateral shape). An upstream holding only bilateral contracts needs no
+configuration to say so - a `404`, `405` or `501` on the ecosystem endpoint moves the lookup on to
+the bilateral one instead of failing it. Everything else is an upstream failure: a `5xx` other than
+`501`, or a transport failure, is retried to the `CONTRACT_SERVICE_RETRY_*` budget and then
+surfaces as `502`, and so does the bilateral endpoint refusing the request the ecosystem one
+deferred.
+
+Outbound HTTP goes through a proxy when `MICRONAUT_HTTP_CLIENT_PROXY_TYPE` and
+`MICRONAUT_HTTP_CLIENT_PROXY_ADDRESS` are set - needed where an identity provider is reachable only
+under its public name. That block is the default for every client, and one client is exempted by
+setting `MICRONAUT_HTTP_SERVICES_<SERVICE>_PROXY_TYPE=DIRECT`
+(`MICRONAUT_HTTP_SERVICES_CONTRACT_SERVICE_PROXY_TYPE` for the Contract Service, which a network
+policy may admit this service to and not the proxy). The exemption needs nothing else: the global
+address is dropped for that client rather than inherited beside the DIRECT type.
+
 ## Related documents
 
 - [`security.md`](security.md): the token, health and signing-key model.
