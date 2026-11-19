@@ -78,7 +78,17 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
 #   -XX:+UseG1GC                  — pin G1; the JVM picks Serial on small containers
 #   -XX:+ExitOnOutOfMemoryError   — exit so the orchestrator restarts a broken JVM
 #   -Djava.io.tmpdir=/tmp         — the only writable path on a read-only root
+#   -XX:-UseBASE64Intrinsics      — Java4Shell (CVE-2026-114938), see below
+#
+# Java4Shell (CVE-2026-114938): the AVX-512 VBMI Base64 intrinsic in OpenJDK
+# >= 17.0.6 miscalculates the output buffer size for input with unexpected
+# padding and writes past the buffer, which allows DoS and — with heap
+# grooming — remote code execution. The base image above still ships
+# OpenJDK 25.0.5+8 and Adoptium has not published a patched eclipse-temurin
+# image yet, so disable the intrinsic, as BSI and Adoptium advise.
+# Remove this flag once the base image ships OpenJDK >= 25.0.5.1.
 ENTRYPOINT ["java", \
+    "-XX:-UseBASE64Intrinsics", \
     "-XX:MaxRAMPercentage=75.0", \
     "-XX:+UseG1GC", \
     "-XX:+ExitOnOutOfMemoryError", \
